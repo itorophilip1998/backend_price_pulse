@@ -1,0 +1,26 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies including OpenSSL for Prisma
+RUN apk add --no-cache libc6-compat openssl
+
+# Copy package files
+COPY package*.json ./
+COPY .npmrc ./
+COPY prisma ./prisma/
+
+# Install dependencies
+RUN npm install
+
+# Generate Prisma Client
+RUN npx prisma generate
+
+# Copy source code (will be overridden by volume mount in dev)
+COPY . .
+
+EXPOSE 3000
+
+# Start in development mode with watch
+CMD ["npm", "run", "start:dev"]
+
