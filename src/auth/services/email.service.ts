@@ -5,26 +5,44 @@ import * as nodemailer from 'nodemailer';
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
-  private transporter: nodemailer.Transporter;
+  private transporter: nodemailer.Transporter | null = null;
 
   constructor(private configService: ConfigService) {
-    this.transporter = nodemailer.createTransport({
-      host: this.configService.get<string>('SMTP_HOST', 'smtp.gmail.com'),
-      port: this.configService.get<number>('SMTP_PORT', 587),
-      secure: this.configService.get<boolean>('SMTP_SECURE', false),
-      auth: {
-        user: this.configService.get<string>('SMTP_USER'),
-        pass: this.configService.get<string>('SMTP_PASS'),
-      },
-    });
+    const smtpUser = this.configService.get<string>('SMTP_USER');
+    const smtpPass = this.configService.get<string>('SMTP_PASS') || this.configService.get<string>('SMTP_PASSWORD');
+    
+    // Only create transporter if credentials are provided
+    if (smtpUser && smtpPass) {
+      this.transporter = nodemailer.createTransport({
+        host: this.configService.get<string>('SMTP_HOST', 'smtp.gmail.com'),
+        port: this.configService.get<number>('SMTP_PORT', 587),
+        secure: this.configService.get<boolean>('SMTP_SECURE', false),
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
+    } else {
+      this.logger.warn('SMTP credentials not configured. Email functionality will be disabled.');
+    }
   }
 
   async sendVerificationEmail(email: string, token: string): Promise<void> {
+    if (!this.transporter) {
+      this.logger.warn(`Email service not configured. Skipping verification email to ${email}`);
+      return;
+    }
+
     const frontendUrl = this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
     const verificationUrl = `${frontendUrl}/auth/verify-email?token=${token}`;
 
+    const fromEmail = this.configService.get<string>('SMTP_SENDER') || 
+                      this.configService.get<string>('SMTP_FROM', 'noreply@pricepulse.ai');
+    const replyTo = this.configService.get<string>('SMTP_REPLY_TO') || fromEmail;
+
     const mailOptions = {
-      from: this.configService.get<string>('SMTP_FROM', 'noreply@pricepulse.ai'),
+      from: fromEmail,
+      replyTo: replyTo,
       to: email,
       subject: 'Verify your PricePulse account',
       html: `
@@ -47,16 +65,26 @@ export class EmailService {
       this.logger.log(`Verification email sent to ${email}`);
     } catch (error) {
       this.logger.error(`Failed to send verification email to ${email}:`, error);
-      throw error;
+      // Don't throw - allow signup to succeed even if email fails
     }
   }
 
   async sendPasswordResetEmail(email: string, token: string): Promise<void> {
+    if (!this.transporter) {
+      this.logger.warn(`Email service not configured. Skipping password reset email to ${email}`);
+      return;
+    }
+
     const frontendUrl = this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
     const resetUrl = `${frontendUrl}/auth/reset-password/${token}`;
 
+    const fromEmail = this.configService.get<string>('SMTP_SENDER') || 
+                      this.configService.get<string>('SMTP_FROM', 'noreply@pricepulse.ai');
+    const replyTo = this.configService.get<string>('SMTP_REPLY_TO') || fromEmail;
+
     const mailOptions = {
-      from: this.configService.get<string>('SMTP_FROM', 'noreply@pricepulse.ai'),
+      from: fromEmail,
+      replyTo: replyTo,
       to: email,
       subject: 'Reset your PricePulse password',
       html: `
@@ -79,7 +107,7 @@ export class EmailService {
       this.logger.log(`Password reset email sent to ${email}`);
     } catch (error) {
       this.logger.error(`Failed to send password reset email to ${email}:`, error);
-      throw error;
+      // Don't throw - allow password reset to proceed even if email fails
     }
   }
 }

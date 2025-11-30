@@ -5,6 +5,7 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { PasswordService } from './services/password.service';
 import { TokenService } from './services/token.service';
@@ -23,6 +24,7 @@ export class AuthService {
     private tokenService: TokenService,
     private emailService: EmailService,
     private auditService: AuditService,
+    private configService: ConfigService,
   ) {}
 
   async signup(signupDto: SignupDto, ipAddress?: string, userAgent?: string) {
@@ -43,7 +45,9 @@ export class AuthService {
     // Generate verification token
     const verificationToken = randomBytes(32).toString('hex');
     const verificationExpires = new Date();
-    verificationExpires.setHours(verificationExpires.getHours() + 24); // 24 hours
+    // Get expiration minutes from config (default: 5 minutes)
+    const expiryMinutes = this.configService?.get<number>('VERIFICATION_EXPIRY_MINUTES', 5) || 5;
+    verificationExpires.setMinutes(verificationExpires.getMinutes() + expiryMinutes);
 
     // Create user
     const user = await this.prisma.user.create({
@@ -84,6 +88,7 @@ export class AuthService {
         email: user.email,
         isVerified: user.isVerified,
       },
+      verificationExpiresAt: verificationExpires.toISOString(),
     };
   }
 
@@ -213,7 +218,9 @@ export class AuthService {
     // Generate reset token
     const resetToken = randomBytes(32).toString('hex');
     const resetExpires = new Date();
-    resetExpires.setHours(resetExpires.getHours() + 1); // 1 hour
+    // Get expiration hours from config (default: 1 hour)
+    const expiryHours = this.configService?.get<number>('PASSWORD_RESET_EXPIRY_HOURS', 1) || 1;
+    resetExpires.setHours(resetExpires.getHours() + expiryHours);
 
     await this.prisma.user.update({
       where: { id: user.id },
