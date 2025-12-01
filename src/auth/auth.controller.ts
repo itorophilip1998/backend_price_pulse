@@ -16,6 +16,7 @@ import { SigninDto } from './dto/signin.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
@@ -23,10 +24,14 @@ import { AdminGuard } from './guards/admin.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import type { CurrentUserPayload } from './decorators/current-user.decorator';
 import type { Request as ExpressRequest } from 'express';
+import { EmailService } from './services/email.service';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly emailService: EmailService,
+  ) {}
 
   @Post('signup')
   @HttpCode(HttpStatus.CREATED)
@@ -42,6 +47,20 @@ export class AuthController {
     const ipAddress = req.ip || req.headers['x-forwarded-for']?.toString() || 'unknown';
     const userAgent = req.headers['user-agent'] || 'unknown';
     return this.authService.verifyEmail(verifyEmailDto.token, ipAddress, userAgent);
+  }
+
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.OK)
+  async resendVerification(@Body() resendVerificationDto: ResendVerificationDto, @Req() req: ExpressRequest) {
+    const ipAddress = req.ip || req.headers['x-forwarded-for']?.toString() || 'unknown';
+    const userAgent = req.headers['user-agent'] || 'unknown';
+    return this.authService.resendVerificationEmail(resendVerificationDto.email, ipAddress, userAgent);
+  }
+
+  @Post('test-email')
+  @HttpCode(HttpStatus.OK)
+  async testEmail(@Body() body: { email: string }) {
+    return this.emailService.testEmailConnection(body.email);
   }
 
   @Post('signin')
@@ -129,4 +148,3 @@ export class AuthController {
     return this.authService.forgotPassword(forgotPasswordDto.email, ipAddress, userAgent);
   }
 }
-

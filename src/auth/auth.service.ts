@@ -14,7 +14,7 @@ import { AuditService } from './services/audit.service';
 import { SignupDto } from './dto/signup.dto';
 import { SigninDto } from './dto/signin.dto';
 import { UserRole } from '@prisma/client';
-import { randomBytes } from 'crypto';
+import { randomBytes, createHash } from 'crypto';
 
 @Injectable()
 export class AuthService {
@@ -42,7 +42,8 @@ export class AuthService {
     // Hash password
     const passwordHash = await this.passwordService.hashPassword(password);
 
-    // Generate verification token
+    // Generate verification token (64-char hex for link verification)
+    // The 6-digit OTP code will be generated from this token hash in the email service
     const verificationToken = randomBytes(32).toString('hex');
     const verificationExpires = new Date();
     // Get expiration minutes from config (default: 5 minutes)
@@ -93,12 +94,36 @@ export class AuthService {
   }
 
   async verifyEmail(token: string, ipAddress?: string, userAgent?: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { verificationToken: token },
-    });
+    // Support both full token and 6-digit OTP code
+    let user;
+    if (token.length === 6 && /^\d{6}$/.test(token)) {
+      // 6-digit numeric OTP code - find user by generating OTP from stored token
+      const allUsers = await this.prisma.user.findMany({
+        where: {
+          verificationToken: {
+            not: null,
+          },
+          isVerified: false,
+        },
+      });
+      
+      // Find user whose token generates the matching OTP
+      user = allUsers.find((u) => {
+        if (!u.verificationToken) return false;
+        const hash = createHash('sha256').update(u.verificationToken).digest('hex');
+        const numericHash = parseInt(hash.substring(0, 8), 16);
+        const generatedOtp = String(numericHash % 1000000).padStart(6, '0');
+        return generatedOtp === token;
+      });
+    } else {
+      // Full token verification
+      user = await this.prisma.user.findUnique({
+        where: { verificationToken: token },
+      });
+    }
 
     if (!user) {
-      throw new NotFoundException('Invalid verification token');
+      throw new NotFoundException('Invalid verification token or code');
     }
 
     if (user.isVerified) {
@@ -120,8 +145,77 @@ export class AuthService {
 
     await this.auditService.log('EMAIL_VERIFIED', user.id, ipAddress, userAgent);
 
+    // Generate tokens for auto-login after verification
+    const tokens = await this.tokenService.generateTokens({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
     return {
       message: 'Email verified successfully',
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+      },
+    };
+  }
+
+  async resendVerificationEmail(email: string, ipAddress?: string, userAgent?: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    // Don't reveal if user exists for security
+    if (!user) {
+      return {
+        message: 'If an account exists with this email, a verification code has been sent.',
+      };
+    }
+
+    // Check if user is already verified
+    if (user.isVerified) {
+      throw new BadRequestException('Email is already verified');
+    }
+
+    // Generate new verification token
+    const verificationToken = randomBytes(32).toString('hex');
+    const verificationExpires = new Date();
+    const expiryMinutes = this.configService?.get<number>('VERIFICATION_EXPIRY_MINUTES', 5) || 5;
+    verificationExpires.setMinutes(verificationExpires.getMinutes() + expiryMinutes);
+
+    // Update user with new token
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        verificationToken,
+        verificationExpires,
+      },
+    });
+
+    // Generate 6-digit numeric OTP code from the token
+    const hash = createHash('sha256').update(verificationToken).digest('hex');
+    const numericHash = parseInt(hash.substring(0, 8), 16);
+    const otpCode = String(numericHash % 1000000).padStart(6, '0');
+
+    // Send verification email
+    try {
+      await this.emailService.sendVerificationEmail(email, verificationToken, otpCode);
+    } catch (error) {
+      console.error('Failed to send verification email:', error);
+      throw new BadRequestException('Failed to send verification email. Please try again later.');
+    }
+
+    await this.auditService.log('SIGNUP', user.id, ipAddress, userAgent, {
+      action: 'resend_verification',
+    });
+
+    return {
+      message: 'If an account exists with this email, a verification code has been sent.',
+      verificationExpiresAt: verificationExpires.toISOString(),
     };
   }
 
