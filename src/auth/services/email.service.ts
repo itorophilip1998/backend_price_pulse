@@ -58,7 +58,7 @@ export class EmailService {
     }
   }
 
-  async sendVerificationEmail(email: string, token: string): Promise<void> {
+  async sendVerificationEmail(email: string, token: string, otpCode?: string): Promise<void> {
     if (!this.transporter) {
       this.logger.warn(`Email service not configured. Skipping verification email to ${email}`);
       return;
