@@ -75,13 +75,15 @@ export class EmailService {
                       'noreply@pricepulse.ai';
     const replyTo = this.configService.get<string>('SMTP_REPLY_TO') || fromEmail;
 
-    // Generate 6-digit numeric OTP code from token
+    // Use provided OTP code or generate 6-digit numeric OTP code from token
     // We'll use a hash of the token to generate a consistent 6-digit code
     // This ensures the same token always produces the same OTP
-    const hash = crypto.createHash('sha256').update(token).digest('hex');
-    // Use first 8 hex chars from hash, convert to number, then to 6-digit string
-    const numericHash = parseInt(hash.substring(0, 8), 16);
-    const otpCode = String(numericHash % 1000000).padStart(6, '0');
+    const finalOtpCode = otpCode || (() => {
+      const hash = crypto.createHash('sha256').update(token).digest('hex');
+      // Use first 8 hex chars from hash, convert to number, then to 6-digit string
+      const numericHash = parseInt(hash.substring(0, 8), 16);
+      return String(numericHash % 1000000).padStart(6, '0');
+    })();
 
     const mailOptions = {
       from: fromEmail,
@@ -120,7 +122,7 @@ export class EmailService {
                           <td style="padding: 24px 16px; text-align: center;">
                             <p style="margin: 0 0 16px 0; font-size: 13px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">Your Verification Code</p>
                             <div style="background: #ffffff; border: 2px dashed #667eea; border-radius: 8px; padding: 20px 16px; margin: 16px 0;">
-                              <p style="font-size: 32px; font-weight: 700; color: #667eea; letter-spacing: 6px; margin: 0; font-family: 'Courier New', monospace; word-break: break-all; overflow-wrap: break-word;">${otpCode}</p>
+                              <p style="font-size: 32px; font-weight: 700; color: #667eea; letter-spacing: 6px; margin: 0; font-family: 'Courier New', monospace; word-break: break-all; overflow-wrap: break-word;">${finalOtpCode}</p>
                             </div>
                             <p style="margin: 16px 0 0 0; font-size: 13px; color: #6b7280; line-height: 1.5; padding: 0 8px;">Enter this code in the app to verify your account</p>
                           </td>
@@ -193,7 +195,7 @@ Welcome to PricePulse!
 
 Thank you for signing up! Please verify your email address.
 
-Your Verification Code: ${otpCode}
+Your Verification Code: ${finalOtpCode}
 
 Enter this code in the app to verify your account, or click the link below:
 

@@ -480,5 +480,57 @@ export class AuthService {
       adminSettings: user.adminSettings,
     };
   }
+
+  async updateProfile(userId: string, updateData: {
+    firstName?: string;
+    lastName?: string;
+    phone?: string;
+    bio?: string;
+    address1?: string;
+    address2?: string;
+    state?: string;
+    localGovernment?: string;
+    country?: string;
+    deliveryLocation?: string;
+  }) {
+    // Check if profile exists
+    const existingProfile = await this.prisma.profile.findUnique({
+      where: { userId },
+    });
+
+    if (existingProfile) {
+      // Update existing profile
+      const updatedProfile = await this.prisma.profile.update({
+        where: { userId },
+        data: updateData,
+      });
+
+      await this.auditService.log('PROFILE_UPDATE', userId, undefined, undefined, {
+        fields: Object.keys(updateData),
+      });
+
+      return {
+        message: 'Profile updated successfully',
+        profile: updatedProfile,
+      };
+    } else {
+      // Create new profile
+      const newProfile = await this.prisma.profile.create({
+        data: {
+          userId,
+          ...updateData,
+        },
+      });
+
+      await this.auditService.log('PROFILE_UPDATE', userId, undefined, undefined, {
+        action: 'profile_created',
+      });
+
+      return {
+        message: 'Profile created successfully',
+        profile: newProfile,
+      };
+    }
+  }
 }
 
